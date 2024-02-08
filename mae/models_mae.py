@@ -22,7 +22,7 @@ from util.pos_embed import get_2d_sincos_pos_embed
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, img_size=32, patch_size=16, in_chans=3,
+    def __init__(self, img_size=32, patch_size=16, in_chans=11, out_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False):
@@ -55,7 +55,7 @@ class MaskedAutoencoderViT(nn.Module):
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
+        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * out_chans, bias=True) # decoder to patch
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -101,9 +101,9 @@ class MaskedAutoencoderViT(nn.Module):
         assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
 
         h = w = imgs.shape[2] // p
-        x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
+        x = imgs.reshape(shape=(imgs.shape[0], imgs.shape[1], h, p, w, p))
         x = torch.einsum('nchpwq->nhwpqc', x)
-        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 3))
+        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * imgs.shape[1]))
         return x
 
     def unpatchify(self, x):
@@ -114,10 +114,12 @@ class MaskedAutoencoderViT(nn.Module):
         p = self.patch_embed.patch_size[0]
         h = w = int(x.shape[1]**.5)
         assert h * w == x.shape[1]
+
+        # 1, 16, 64
         
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
+        x = x.reshape(shape=(x.shape[0], h, w, p, p, 1))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
+        imgs = x.reshape(shape=(x.shape[0], 1, h * p, h * p))
         return imgs
 
     def random_masking(self, x, mask_ratio):
@@ -195,19 +197,27 @@ class MaskedAutoencoderViT(nn.Module):
         # remove cls token
         x = x[:, 1:, :]
 
+        x = self.unpatchify(x)
+        # [400, 1, 32, 32]
+        N, C, H, W = target_val.shape
+        target_val = target_val.reshape(N, C*H*W)
+        target_val = torch.nn.functional.softmax(target_val, dim=1)
+        target_val = target_val.reshape(N, C, H, W)
+
         return x
 
-    def forward_loss(self, imgs, pred, mask):
+    def forward_loss(self, target, pred, mask):
         """
-        imgs: [N, 3, H, W]
+        y: [N, 1, H, W]
         pred: [N, L, p*p*3]
         mask: [N, L], 0 is keep, 1 is remove, 
         """
-        target = self.patchify(imgs)
+        target = self.patchify(target)
+        pred = self.patchify(pred)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
-            target = (target - mean) / (var + 1.e-6)**.5
+            target = (target - mean) / (var + 1.e-6)**.540
 
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
@@ -217,16 +227,18 @@ class MaskedAutoencoderViT(nn.Module):
         
         return loss
 
-    def forward(self, imgs, mask_ratio=0.75):
-        latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio)
+    def forward(self, features, target, mask_ratio=0.75):
+        features = torch.einsum('nhwc->ncwh', features)  # to [N, C, W, H]
+        target = target.unsqueeze(1)
+        latent, mask, ids_restore = self.forward_encoder(features, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        loss = self.forward_loss(imgs, pred, mask)
+        loss = self.forward_loss(target, pred, mask)
         return loss, pred, mask
 
 def mae_vit(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=8, embed_dim=1024, depth=8, num_heads=8,
-        decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=8,
+        patch_size=8, embed_dim=1024, depth=24, num_heads=16,
+        decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
         mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
