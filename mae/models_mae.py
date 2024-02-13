@@ -216,6 +216,16 @@ class MaskedAutoencoderViT(nn.Module):
         mask: [N, L], 0 is keep, 1 is remove, 
         """
 
+        # target = target / target.max()
+
+        for b in range(target.shape[0]):
+            max_target = target[b].max().item()
+            if max_target != 0:
+                target[b] = target[b] / max_target
+            # sum_pred = pred[b].sum().item()
+            # if sum_pred != 0:
+            #     pred[b] = pred[b] / max_target
+
         target = self.patchify(target)
         pred = self.patchify(pred)
         
@@ -248,13 +258,6 @@ class MaskedAutoencoderViT(nn.Module):
         # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         loss = loss.mean()
 
-        # for b in range(target.shape[0]):
-        #     sum_target = target[b].sum().item()
-        #     if sum_target != 0:
-        #         target[b] = target[b] / sum_target
-        #     sumx_pred = pred[b].sum().item()
-        #     if sumx_pred != 0:
-        #         pred[b] = pred[b] / sumx_pred
         # pred[pred == 0] = 1e-12
         # pred[pred == 1] = 1-1e-12
         # target[target == 0] = 1e-12
@@ -277,8 +280,8 @@ class MaskedAutoencoderViT(nn.Module):
 
 def mae_vit(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=8, embed_dim=1024, depth=12, num_heads=8,
-        decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=8,
+        patch_size=8, embed_dim=768, depth=12, num_heads=12,
+        decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=16,
         mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
