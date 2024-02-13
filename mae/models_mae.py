@@ -227,28 +227,34 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
         
-        # print(f'target max: {target.max()}')
-        # print(f'pred max: {pred.max()}')
+        # print(f'target mean: {target[0].mean()}')
+        # print(f'pred mean: {pred[0].mean()}')
         # import matplotlib.pyplot as plt
         # import sys
-        # chos = 1
+        # chos = 0
         # plt.rcParams['figure.figsize'] = [12, 24]
         # for i in range(16):
         #     plt.subplot(8, 4, i+1)
-        #     plt.imshow(pred[chos][i].view(8,8).detach().cpu().numpy(),vmin=0, vmax=target[0].max())
+        #     plt.imshow(pred[chos][i].view(8,8).detach().cpu().numpy())
         #     plt.title(f'{loss[chos][i]:.4f}')
         #     plt.axis('off')
         #     plt.subplot(8, 4, i+16+1)
-        #     plt.imshow(target[chos][i].view(8,8).detach().cpu().numpy(),vmin=0, vmax=target[0].max())
+        #     plt.imshow(target[chos][i].view(8,8).detach().cpu().numpy())
         #     plt.axis('off')
         # plt.savefig(f'output_dir/reconstructed.png')
-        # sys.exit(0)
+        # # sys.exit(0)
+        
 
         # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         loss = loss.mean()
 
-        # pred = pred/pred.sum()
-        # target = target/target.sum()
+        # for b in range(target.shape[0]):
+        #     sum_target = target[b].sum().item()
+        #     if sum_target != 0:
+        #         target[b] = target[b] / sum_target
+        #     sumx_pred = pred[b].sum().item()
+        #     if sumx_pred != 0:
+        #         pred[b] = pred[b] / sumx_pred
         # pred[pred == 0] = 1e-12
         # pred[pred == 1] = 1-1e-12
         # target[target == 0] = 1e-12
@@ -261,7 +267,6 @@ class MaskedAutoencoderViT(nn.Module):
 
     def forward(self, features, target=None, mask_ratio=0.75):
         features = torch.einsum('nhwc->ncwh', features)  # to [N, C, W, H]
-        features = features / features.max()
         latent, mask, ids_restore = self.forward_encoder(features, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
         loss = None
@@ -272,8 +277,8 @@ class MaskedAutoencoderViT(nn.Module):
 
 def mae_vit(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=8, embed_dim=768, depth=12, num_heads=12,
-        decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=16,
+        patch_size=8, embed_dim=1024, depth=12, num_heads=8,
+        decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=8,
         mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 

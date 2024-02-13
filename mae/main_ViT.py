@@ -38,7 +38,7 @@ DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=400, type=int,
+    parser.add_argument('--batch_size', default=200, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
@@ -64,12 +64,12 @@ def get_args_parser():
 
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-4, metavar='LR', # 1e-4
+    parser.add_argument('--blr', type=float, default=1e-3, metavar='LR', # 1e-4
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
 
-    parser.add_argument('--warmup_epochs', type=int, default=20, metavar='N', #20
+    parser.add_argument('--warmup_epochs', type=int, default=15, metavar='N', #20
                         help='epochs to warmup LR')
 
     # Dataset parameters
