@@ -25,7 +25,7 @@ def train_one_epoch(model: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler,
                     log_writer=None,
                     args=None):
-    model.train(True) # Set model to training mode
+    
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('val_loss', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -40,6 +40,8 @@ def train_one_epoch(model: torch.nn.Module,
         print('log_dir: {}'.format(log_writer.log_dir))
 
     for data_iter_step, (samples, target) in enumerate(metric_logger.log_every(data_loader_train, print_freq, header)):
+        
+        model.train(True) # Set model to training mode
 
         # we use a per iteration (instead of per epoch) lr scheduler
         if data_iter_step % accum_iter == 0:
@@ -78,7 +80,7 @@ def train_one_epoch(model: torch.nn.Module,
             sample_val = sample_val.to(device, non_blocking=True)
             target_val = target_val.to(device, non_blocking=True)
             val_loss, pred_val, _ = model(sample_val, target_val, mask_ratio=args.mask_ratio)
-            
+
             # pred_val = pred_val.squeeze(1)
             # # pred_val = pred_val / pred_val.sum()
             # # N, H, W = pred_val.shape
@@ -98,12 +100,12 @@ def train_one_epoch(model: torch.nn.Module,
             #     kl = (target_val[z]*(target_val[z].log()-pred_val[z].log())).sum()
             #     kls.append(kl)
             # kls = torch.stack(kls)
+
+            val_loss_value = val_loss.item()
+            # klmean = torch.mean(kls)
+            # klstd = torch.std(kls)
             del sample_val, target_val, pred_val
         
-        val_loss_value = val_loss.item()
-        # klmean = torch.mean(kls)
-        # klstd = torch.std(kls)
-
         metric_logger.update(val_loss=val_loss_value)
         # metric_logger.update(kl_div_mean=klmean)
         # metric_logger.update(kl_div_std=klstd)

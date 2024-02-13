@@ -20,43 +20,6 @@ from timm.models.vision_transformer import PatchEmbed, Block
 
 from util.pos_embed import get_2d_sincos_pos_embed
 
-class SpatialSoftmax(torch.nn.Module):
-    def __init__(self, height, width, channel, temperature=None, data_format='NCHW'):
-        super(SpatialSoftmax, self).__init__()
-        self.data_format = data_format
-        self.height = height
-        self.width = width
-        self.channel = channel
-
-        if temperature:
-            self.temperature = torch.nn.parameter(torch.ones(1)*temperature)
-        else:
-            self.temperature = 1.
-
-        pos_x, pos_y = np.meshgrid(
-                np.linspace(-1., 1., self.height),
-                np.linspace(-1., 1., self.width)
-                )
-        pos_x = torch.from_numpy(pos_x.reshape(self.height*self.width)).float()
-        pos_y = torch.from_numpy(pos_y.reshape(self.height*self.width)).float()
-        self.register_buffer('pos_x', pos_x)
-        self.register_buffer('pos_y', pos_y)
-    
-    def forward(self, feature):
-        # Output:
-        #   (N, C*2) x_0 y_0 ...
-        if self.data_format == 'NHWC':
-            feature = feature.transpose(1, 3).tranpose(2, 3).view(-1, self.height*self.width)
-        else:
-            feature = feature.view(-1, self.height*self.width)
-
-        softmax_attention = torch.nn.functional.softmax(feature/self.temperature, dim=-1).to('cpu')
-        expected_x = torch.sum(self.pos_x*softmax_attention, dim=1, keepdim=True)
-        expected_y = torch.sum(self.pos_y*softmax_attention, dim=1, keepdim=True)
-        expected_xy = torch.cat([expected_x, expected_y], 1)
-        feature_keypoints = expected_xy.view(-1, self.channel*2)
-
-        return feature_keypoints
 
 
 class MaskedAutoencoderViT(nn.Module):
@@ -242,10 +205,7 @@ class MaskedAutoencoderViT(nn.Module):
         x = torch.sigmoid(x)
 
         # N, C, H, W = x.shape
-        # # print(x.shape)
         # x = torch.nn.functional.softmax(x.view(N,C*H*W), dim=1).view(N,C,H,W)
-        # # x = SpatialSoftmax(H, W, C)(x)
-        # # print(x.shape)
 
         return x
 
@@ -287,18 +247,6 @@ class MaskedAutoencoderViT(nn.Module):
         # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         loss = loss.mean()
 
-        # # # Add inverse channel to pred
-        # pred = pred.unsqueeze(1)
-        # pred_inv = pred.clone()
-        # pred_inv = 1 - pred_inv
-        # pred = torch.cat((pred, pred_inv), 1)
-
-        # # Add inverse channel to target
-        # target = target.unsqueeze(1)
-        # target_inv = target.clone()
-        # target_inv = 1 - target_inv
-        # target = torch.cat((target, target_inv), 1)
-
         # pred = pred/pred.sum()
         # target = target/target.sum()
         # pred[pred == 0] = 1e-12
@@ -307,13 +255,13 @@ class MaskedAutoencoderViT(nn.Module):
         # target[target == 1] = 1-1e-12
 
         # loss = torch.nn.BCEWithLogitsLoss()(pred, target)
+        # loss = torch.nn.functional.kl_div(pred.log(), target, reduction='batchmean')
         
         return loss
 
     def forward(self, features, target=None, mask_ratio=0.75):
         features = torch.einsum('nhwc->ncwh', features)  # to [N, C, W, H]
         features = features / features.max()
-        features[features == 0] = 1e-12
         latent, mask, ids_restore = self.forward_encoder(features, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
         loss = None
