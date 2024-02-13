@@ -216,15 +216,15 @@ class MaskedAutoencoderViT(nn.Module):
         mask: [N, L], 0 is keep, 1 is remove, 
         """
 
-        # target = target / target.max()
+        target = target / target.max()
 
-        for b in range(target.shape[0]):
-            max_target = target[b].max().item()
-            if max_target != 0:
-                target[b] = target[b] / max_target
-            # sum_pred = pred[b].sum().item()
-            # if sum_pred != 0:
-            #     pred[b] = pred[b] / max_target
+        # for b in range(target.shape[0]):
+        #     max_target = target[b].max().item()
+        #     if max_target != 0:
+        #         target[b] = target[b] / max_target
+        #     # sum_pred = pred[b].sum().item()
+        #     # if sum_pred != 0:
+        #     #     pred[b] = pred[b] / max_target
 
         target = self.patchify(target)
         pred = self.patchify(pred)

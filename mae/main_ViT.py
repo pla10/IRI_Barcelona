@@ -35,6 +35,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/'
+input_size = 32
+prfx = 'test6'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -48,7 +50,7 @@ def get_args_parser():
     parser.add_argument('--model', default='mae_vit', type=str, metavar='MODEL',
                         help='Name of model to train')
 
-    parser.add_argument('--input_size', default=32, type=int,
+    parser.add_argument('--input_size', default=input_size, type=int,
                         help='images input size')
 
     parser.add_argument('--mask_ratio', default=0.75, type=float,
@@ -108,8 +110,8 @@ def get_args_parser():
 
 class SemanticMapDataset(Dataset):
     def __init__(self, data_dirs, transform=None, target_transform=None):
-        self.train_x = np.empty((0, 32, 32, 12))
-        self.train_y = np.empty((0, 32, 32))
+        self.train_x = np.empty((0, input_size, input_size, 12))
+        self.train_y = np.empty((0, input_size, input_size))
         for data_dir in data_dirs:
             train_data_dir = DATASET_PATH+data_dir
             assert os.path.exists(train_data_dir), f'data_dir {train_data_dir} does not exist'
@@ -362,7 +364,7 @@ def main(rank, world_size):
             if args.output_dir and epoch == args.epochs:
                 misc.save_model(
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                    loss_scaler=loss_scaler, epoch=epoch, id=model_id, prefix='test5')
+                    loss_scaler=loss_scaler, epoch=epoch, id=model_id, prefix=prfx)
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                             'epoch': epoch,}
