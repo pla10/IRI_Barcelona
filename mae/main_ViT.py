@@ -69,7 +69,7 @@ def get_args_parser():
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
 
-    parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N', #20
+    parser.add_argument('--warmup_epochs', type=int, default=20, metavar='N', #20
                         help='epochs to warmup LR')
 
     # Dataset parameters
@@ -259,7 +259,9 @@ def main(rank, world_size):
     # # train_data_dirs = [train_data_dirs.pop()]         # UNCOMMENT FOR FAST DEBUGGING 
     # # val_data_dirs = [val_data_dirs.pop()]             # UNCOMMENT FOR FAST DEBUGGING 
 
-    for i in range(len(data_dirs)):
+    i = 0
+    if True:
+    # for i in range(len(data_dirs)):
 
         train_data_dirs = data_dirs[:]
         val_data_dirs = [train_data_dirs.pop(i)]
@@ -360,7 +362,7 @@ def main(rank, world_size):
             if args.output_dir and epoch == args.epochs:
                 misc.save_model(
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                    loss_scaler=loss_scaler, epoch=epoch, id=model_id)
+                    loss_scaler=loss_scaler, epoch=epoch, id=model_id, prefix='test5')
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                             'epoch': epoch,}
