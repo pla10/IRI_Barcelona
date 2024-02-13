@@ -14,15 +14,55 @@ from functools import partial
 import torch
 import torch.nn as nn
 
+import numpy as np
+
 from timm.models.vision_transformer import PatchEmbed, Block
 
 from util.pos_embed import get_2d_sincos_pos_embed
+
+class SpatialSoftmax(torch.nn.Module):
+    def __init__(self, height, width, channel, temperature=None, data_format='NCHW'):
+        super(SpatialSoftmax, self).__init__()
+        self.data_format = data_format
+        self.height = height
+        self.width = width
+        self.channel = channel
+
+        if temperature:
+            self.temperature = torch.nn.parameter(torch.ones(1)*temperature)
+        else:
+            self.temperature = 1.
+
+        pos_x, pos_y = np.meshgrid(
+                np.linspace(-1., 1., self.height),
+                np.linspace(-1., 1., self.width)
+                )
+        pos_x = torch.from_numpy(pos_x.reshape(self.height*self.width)).float()
+        pos_y = torch.from_numpy(pos_y.reshape(self.height*self.width)).float()
+        self.register_buffer('pos_x', pos_x)
+        self.register_buffer('pos_y', pos_y)
+    
+    def forward(self, feature):
+        # Output:
+        #   (N, C*2) x_0 y_0 ...
+        if self.data_format == 'NHWC':
+            feature = feature.transpose(1, 3).tranpose(2, 3).view(-1, self.height*self.width)
+        else:
+            feature = feature.view(-1, self.height*self.width)
+
+        softmax_attention = torch.nn.functional.softmax(feature/self.temperature, dim=-1).to('cpu')
+        expected_x = torch.sum(self.pos_x*softmax_attention, dim=1, keepdim=True)
+        expected_y = torch.sum(self.pos_y*softmax_attention, dim=1, keepdim=True)
+        expected_xy = torch.cat([expected_x, expected_y], 1)
+        feature_keypoints = expected_xy.view(-1, self.channel*2)
+
+        return feature_keypoints
 
 
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, img_size=32, patch_size=16, in_chans=11, out_chans=1,
+    def __init__(self, img_size=32, patch_size=16, in_chans=12, out_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False):
@@ -199,10 +239,13 @@ class MaskedAutoencoderViT(nn.Module):
 
         x = self.unpatchify(x)
         # [400, 1, 32, 32]
-        N, C, H, W = target_val.shape
-        target_val = target_val.reshape(N, C*H*W)
-        target_val = torch.nn.functional.softmax(target_val, dim=1)
-        target_val = target_val.reshape(N, C, H, W)
+        x = torch.sigmoid(x)
+
+        # N, C, H, W = x.shape
+        # # print(x.shape)
+        # x = torch.nn.functional.softmax(x.view(N,C*H*W), dim=1).view(N,C,H,W)
+        # # x = SpatialSoftmax(H, W, C)(x)
+        # # print(x.shape)
 
         return x
 
@@ -212,8 +255,10 @@ class MaskedAutoencoderViT(nn.Module):
         pred: [N, L, p*p*3]
         mask: [N, L], 0 is keep, 1 is remove, 
         """
+
         target = self.patchify(target)
         pred = self.patchify(pred)
+        
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
@@ -221,24 +266,66 @@ class MaskedAutoencoderViT(nn.Module):
 
         loss = (pred - target) ** 2
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+        
+        # print(f'target max: {target.max()}')
+        # print(f'pred max: {pred.max()}')
+        # import matplotlib.pyplot as plt
+        # import sys
+        # chos = 1
+        # plt.rcParams['figure.figsize'] = [12, 24]
+        # for i in range(16):
+        #     plt.subplot(8, 4, i+1)
+        #     plt.imshow(pred[chos][i].view(8,8).detach().cpu().numpy(),vmin=0, vmax=target[0].max())
+        #     plt.title(f'{loss[chos][i]:.4f}')
+        #     plt.axis('off')
+        #     plt.subplot(8, 4, i+16+1)
+        #     plt.imshow(target[chos][i].view(8,8).detach().cpu().numpy(),vmin=0, vmax=target[0].max())
+        #     plt.axis('off')
+        # plt.savefig(f'output_dir/reconstructed.png')
+        # sys.exit(0)
 
         # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        loss = loss.mean() 
+        loss = loss.mean()
+
+        # # # Add inverse channel to pred
+        # pred = pred.unsqueeze(1)
+        # pred_inv = pred.clone()
+        # pred_inv = 1 - pred_inv
+        # pred = torch.cat((pred, pred_inv), 1)
+
+        # # Add inverse channel to target
+        # target = target.unsqueeze(1)
+        # target_inv = target.clone()
+        # target_inv = 1 - target_inv
+        # target = torch.cat((target, target_inv), 1)
+
+        # pred = pred/pred.sum()
+        # target = target/target.sum()
+        # pred[pred == 0] = 1e-12
+        # pred[pred == 1] = 1-1e-12
+        # target[target == 0] = 1e-12
+        # target[target == 1] = 1-1e-12
+
+        # loss = torch.nn.BCEWithLogitsLoss()(pred, target)
         
         return loss
 
-    def forward(self, features, target, mask_ratio=0.75):
+    def forward(self, features, target=None, mask_ratio=0.75):
         features = torch.einsum('nhwc->ncwh', features)  # to [N, C, W, H]
-        target = target.unsqueeze(1)
+        features = features / features.max()
+        features[features == 0] = 1e-12
         latent, mask, ids_restore = self.forward_encoder(features, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        loss = self.forward_loss(target, pred, mask)
+        loss = None
+        if target is not None:
+            target = target.unsqueeze(1)
+            loss = self.forward_loss(target, pred, mask)
         return loss, pred, mask
 
 def mae_vit(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=8, embed_dim=1024, depth=24, num_heads=16,
-        decoder_embed_dim=512, decoder_depth=2, decoder_num_heads=16,
+        patch_size=8, embed_dim=768, depth=12, num_heads=12,
+        decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=16,
         mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 

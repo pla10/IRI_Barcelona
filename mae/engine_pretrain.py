@@ -29,10 +29,10 @@ def train_one_epoch(model: torch.nn.Module,
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('val_loss', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    metric_logger.add_meter('kl_div_mean', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    metric_logger.add_meter('kl_div_std', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    # metric_logger.add_meter('kl_div_mean', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    # metric_logger.add_meter('kl_div_std', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 20
+    print_freq = 20 #20
     accum_iter = args.accum_iter
 
     optimizer.zero_grad()
@@ -52,7 +52,6 @@ def train_one_epoch(model: torch.nn.Module,
             loss, _, _ = model(samples, target, mask_ratio=args.mask_ratio)
 
         del samples, target
-
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -80,35 +79,38 @@ def train_one_epoch(model: torch.nn.Module,
             target_val = target_val.to(device, non_blocking=True)
             val_loss, pred_val, _ = model(sample_val, target_val, mask_ratio=args.mask_ratio)
             
-            pred_val = pred_val.squeeze(1)
-            N, H, W = pred_val.shape
-            pred_val = pred_val.reshape(N, H*W)
-            pred_val = torch.nn.functional.softmax(pred_val, dim=1)
-            pred_val = pred_val.reshape(N, H, W)
+            # pred_val = pred_val.squeeze(1)
+            # # pred_val = pred_val / pred_val.sum()
+            # # N, H, W = pred_val.shape
+            # # pred_val = pred_val.reshape(N, H*W)
+            # # pred_val = torch.nn.functional.softmax(pred_val, dim=1)
+            # # pred_val = pred_val.reshape(N, H, W)
 
-            N, H, W = target_val.shape
-            target_val = target_val.reshape(N, H*W)
-            target_val = torch.nn.functional.softmax(target_val, dim=1)
-            target_val = target_val.reshape(N, H, W)
-            kls = []
-            for z in range(target_val.shape[0]):
-                kl = 0
-                kl = (target_val[z]*(target_val[z].log()-pred_val[z].log())).sum()
-                kls.append(kl)
-            kls = torch.stack(kls)
+            # # target_val = target_val / target_val.sum()
+            # # N, H, W = target_val.shape
+            # # target_val = target_val.reshape(N, H*W)
+            # # target_val = torch.nn.functional.softmax(target_val, dim=1)
+            # # target_val = target_val.reshape(N, H, W)
+            
+            # kls = []
+            # for z in range(target_val.shape[0]):
+            #     kl = 0
+            #     kl = (target_val[z]*(target_val[z].log()-pred_val[z].log())).sum()
+            #     kls.append(kl)
+            # kls = torch.stack(kls)
             del sample_val, target_val, pred_val
         
         val_loss_value = val_loss.item()
-        klmean = torch.mean(kls)
-        klstd = torch.std(kls)
+        # klmean = torch.mean(kls)
+        # klstd = torch.std(kls)
 
         metric_logger.update(val_loss=val_loss_value)
-        metric_logger.update(kl_div_mean=klmean)
-        metric_logger.update(kl_div_std=klstd)
+        # metric_logger.update(kl_div_mean=klmean)
+        # metric_logger.update(kl_div_std=klstd)
 
         val_loss_value_reduce = misc.all_reduce_mean(val_loss_value)
-        klmean_reduce = misc.all_reduce_mean(klmean)
-        klstd_reduce = misc.all_reduce_mean(klstd)
+        # klmean_reduce = misc.all_reduce_mean(klmean)
+        # klstd_reduce = misc.all_reduce_mean(klstd)
 
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
@@ -119,8 +121,8 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_val_loss', val_loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
-            log_writer.add_scalar('kl_div_mean', klmean_reduce, epoch_1000x)
-            log_writer.add_scalar('kl_div_std', klstd_reduce, epoch_1000x)
+            # log_writer.add_scalar('kl_div_mean', klmean_reduce, epoch_1000x)
+            # log_writer.add_scalar('kl_div_std', klstd_reduce, epoch_1000x)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
