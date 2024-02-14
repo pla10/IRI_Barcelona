@@ -34,13 +34,13 @@ from engine_pretrain import train_one_epoch
 import warnings
 warnings.filterwarnings('ignore')
 
-DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/'
-input_size = 32
-prfx = 'test6'
+DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/64crop_size/1red/'
+input_size = 64
+prfx = 'test7'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
-    parser.add_argument('--batch_size', default=400, type=int,
+    parser.add_argument('--batch_size', default=200, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
     parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
