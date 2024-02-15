@@ -36,7 +36,7 @@ warnings.filterwarnings('ignore')
 
 DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/64crop_size/1red/'
 input_size = 64
-mask_ratio = 0 # 0.75
+mask_ratio = 0.75 # 0.75
 prfx = 'test8'
 
 def get_args_parser():
@@ -172,23 +172,25 @@ def run_one_image(x, target, model, epoch=None):
     # run MAE
     x = x.to('cuda')
     target = target.to('cuda')
-    _, y, _ = model(x, mask_ratio=mask_ratio)
+    _, y, mask = model(x, mask_ratio=mask_ratio)
     x = x.detach().cpu()
     target = target.detach().cpu()
     
-    y = torch.einsum('nchw->nhwc', y).detach().cpu()
-    y = y.squeeze(3)
+    y = y.squeeze(3).detach().cpu()
 
-    # # visualize the mask
-    # mask = mask.detach()
-    # mask = mask.unsqueeze(-1).repeat(1, 1, model.module.patch_embed.patch_size[0]**2 *3)  # (N, H*W, p*p*3)
-    # mask = model.module.unpatchify(mask)  # 1 is removing, 0 is keeping
-    # mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
-    
-    # x = torch.einsum('nchw->nhwc', x).detach().cpu()
+    is_mae = 0
+    if mask is not None:
+        # visualize the mask
+        mask = mask.detach()
+        mask = mask.unsqueeze(-1).repeat(1, 1, model.module.patch_embed.patch_size[0]**2 *1)  # (N, H*W, p*p*3)
+        mask = model.module.unpatchify(mask)  # 1 is removing, 0 is keeping
+        mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
+        mask = mask.squeeze(-1)
 
-    # # masked image
-    # im_masked = x * (1 - mask)
+        # masked image
+        im_masked = target * (1 - mask) + mask*target.max()
+
+        is_mae = 1
 
     # # MAE reconstruction pasted with visible patches
     # im_paste = x * (1 - mask) + y * mask
@@ -196,27 +198,25 @@ def run_one_image(x, target, model, epoch=None):
     # make the plt figure larger
     plt.rcParams['figure.figsize'] = [24, 12] # W: 24, H: 12
 
-    plt.subplot(1, 4, 3)
-    plt.imshow(target[0])
-    plt.title('target', fontsize=23)
-    plt.axis('off')
-
-    plt.subplot(1, 4, 4)
-    plt.imshow(y[0])
-    plt.title('y', fontsize=23)
-    plt.axis('off')
-
-    plt.subplot(1, 4, 1)
+    plt.subplot(1, 2+is_mae, 1)
     show_image(x[0], target[0], "original")
 
-    # plt.subplot(1, 4, 2)
-    # show_image(im_masked[0], "masked")
+    if is_mae:
+        plt.subplot(1, 2+is_mae, 2)
+        show_image(x[0], im_masked[0], "masked")
 
-    plt.subplot(1, 4, 2)
+    plt.subplot(1, 2+is_mae, 2+is_mae)
     show_image(x[0], y[0], "prediction")
 
+    # plt.subplot(1, 4, 3)
+    # plt.imshow(target[0])
+    # plt.title('target', fontsize=23)
+    # plt.axis('off')
+
     # plt.subplot(1, 4, 4)
-    # show_image(im_paste[0], "reconstruction + visible")
+    # plt.imshow(y[0])
+    # plt.title('y', fontsize=23)
+    # plt.axis('off')
 
     if epoch is not None:
         # if epoch % 5 == 0:

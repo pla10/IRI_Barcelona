@@ -25,7 +25,7 @@ from util.pos_embed import get_2d_sincos_pos_embed
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, img_size=32, patch_size=16, in_chans=12, out_chans=1,
+    def __init__(self, img_size=64, patch_size=16, in_chans=12, out_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False):
@@ -273,18 +273,19 @@ class MaskedAutoencoderViT(nn.Module):
         return loss
 
     def forward(self, features, target=None, mask_ratio=0):
-        features = torch.einsum('nhwc->ncwh', features)  # to [N, C, W, H]
+        features = torch.einsum('nhwc->nchw', features)  # to [N, C, W, H]
         latent, mask, ids_restore = self.forward_encoder(features, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
         loss = None
         if target is not None:
             target = target.unsqueeze(1)
             loss = self.forward_loss(target, pred, mask)
+        pred = torch.einsum('nchw->nhwc', pred) # to [N, H, W, C]
         return loss, pred, mask
 
 def mae_vit(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=8, embed_dim=768, depth=12, num_heads=12,
+        patch_size=8, embed_dim=1024, depth=24, num_heads=16,
         decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=16,
         mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
