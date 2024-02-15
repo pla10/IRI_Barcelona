@@ -36,7 +36,8 @@ warnings.filterwarnings('ignore')
 
 DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/64crop_size/1red/'
 input_size = 64
-prfx = 'test7'
+mask_ratio = 0 # 0.75
+prfx = 'test8'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -53,7 +54,7 @@ def get_args_parser():
     parser.add_argument('--input_size', default=input_size, type=int,
                         help='images input size')
 
-    parser.add_argument('--mask_ratio', default=0.75, type=float,
+    parser.add_argument('--mask_ratio', default=mask_ratio, type=float, #0.75
                         help='Masking ratio (percentage of removed patches).')
 
     parser.add_argument('--norm_pix_loss', action='store_true',
@@ -78,7 +79,7 @@ def get_args_parser():
     parser.add_argument('--data_path', default='./data/cifar10', type=str,
                         help='dataset path')
 
-    parser.add_argument('--output_dir', default='./output_dir',
+    parser.add_argument('--output_dir', default='/data/placido',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
@@ -171,7 +172,7 @@ def run_one_image(x, target, model, epoch=None):
     # run MAE
     x = x.to('cuda')
     target = target.to('cuda')
-    _, y, _ = model(x, mask_ratio=0.75)
+    _, y, _ = model(x, mask_ratio=mask_ratio)
     x = x.detach().cpu()
     target = target.detach().cpu()
     
@@ -219,8 +220,8 @@ def run_one_image(x, target, model, epoch=None):
 
     if epoch is not None:
         # if epoch % 5 == 0:
-        plt.savefig(f'output_dir/vit_training_{epoch}.png')
-        plt.savefig(f'output_dir/vit_training_last.png')
+        plt.savefig(f'image_logs/vit_training_{epoch}.png')
+        plt.savefig(f'image_logs/vit_training_last.png')
     else:
         plt.show()
     
@@ -262,8 +263,8 @@ def main(rank, world_size):
     # # val_data_dirs = [val_data_dirs.pop()]             # UNCOMMENT FOR FAST DEBUGGING 
 
     i = 0
-    if True:
-    # for i in range(len(data_dirs)):
+    # if True:
+    for i in range(len(data_dirs)):
 
         train_data_dirs = data_dirs[:]
         val_data_dirs = [train_data_dirs.pop(i)]
@@ -355,7 +356,7 @@ def main(rank, world_size):
                 log_writer=log_writer,
                 args=args
             )
-            if args.output_dir and (epoch % 5 == 0 or epoch == args.epochs):    
+            if epoch % 5 == 0 or epoch == args.epochs:    
                 idx = np.random.randint(0, dataset_test.__len__())
                 print(f'sample id: {idx}')
                 features_test = features[idx]

@@ -25,7 +25,7 @@ from util.pos_embed import get_2d_sincos_pos_embed
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, img_size=64, patch_size=16, in_chans=12, out_chans=1,
+    def __init__(self, img_size=32, patch_size=16, in_chans=12, out_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False):
@@ -159,10 +159,13 @@ class MaskedAutoencoderViT(nn.Module):
         # add pos embed w/o cls token
         x = x + self.pos_embed[:, 1:, :]
 
-        # # masking: length -> length * mask_ratio
-        # x, mask, ids_restore = self.random_masking(x, mask_ratio)
-        mask = None
-        ids_restore = None
+        # if mask_ratio is not zero, perform random masking
+        if mask_ratio > 0:
+            # masking: length -> length * mask_ratio
+            x, mask, ids_restore = self.random_masking(x, mask_ratio)
+        else:
+            mask = None
+            ids_restore = None
 
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
@@ -180,11 +183,12 @@ class MaskedAutoencoderViT(nn.Module):
         # embed tokens
         x = self.decoder_embed(x)
 
-        # # append mask tokens to sequence
-        # mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
-        # x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
-        # x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
-        # x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        if ids_restore is not None:
+            # append mask tokens to sequence
+            mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+            x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+            x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
+            x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
 
         # add pos embed
         x = x + self.decoder_pos_embed
@@ -268,7 +272,7 @@ class MaskedAutoencoderViT(nn.Module):
         
         return loss
 
-    def forward(self, features, target=None, mask_ratio=0.75):
+    def forward(self, features, target=None, mask_ratio=0):
         features = torch.einsum('nhwc->ncwh', features)  # to [N, C, W, H]
         latent, mask, ids_restore = self.forward_encoder(features, mask_ratio)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
@@ -280,7 +284,7 @@ class MaskedAutoencoderViT(nn.Module):
 
 def mae_vit(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=8, embed_dim=1024, depth=24, num_heads=16,
+        patch_size=8, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=512, decoder_depth=1, decoder_num_heads=16,
         mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
