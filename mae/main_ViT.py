@@ -34,10 +34,12 @@ from engine_pretrain import train_one_epoch
 import warnings
 warnings.filterwarnings('ignore')
 
-DATASET_PATH = '/home/placido.falqueto/IRI_Barcelona/training_data/64crop_size/1red/'
+DATASET_PATH = '/data/placido/training_data/64crop_size/13labels/1red/'
+STOP_TRAINING_AFTER_EPOCHS = 15
 input_size = 64
 mask_ratio = 0.75 # 0.75
-prfx = 'test8'
+prfx = 'stops1'
+Yfile = 'train_Y2'
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -111,7 +113,7 @@ def get_args_parser():
 
 class SemanticMapDataset(Dataset):
     def __init__(self, data_dirs, transform=None, target_transform=None):
-        self.train_x = np.empty((0, input_size, input_size, 12))
+        self.train_x = np.empty((0, input_size, input_size, 13))
         self.train_y = np.empty((0, input_size, input_size))
         for data_dir in data_dirs:
             train_data_dir = DATASET_PATH+data_dir
@@ -121,7 +123,7 @@ class SemanticMapDataset(Dataset):
             train_x_aux = np.delete(train_x_aux, [0,1,2,3])
             train_x_aux = np.reshape(train_x_aux,sizes)
 
-            train_y_aux = np.loadtxt(train_data_dir+'/train_Y.csv')
+            train_y_aux = np.loadtxt(train_data_dir+'/'+Yfile+'.csv')
             sizes = train_y_aux[0:3].astype(int)
             train_y_aux = np.delete(train_y_aux, [0,1,2])
             train_y_aux = np.reshape(train_y_aux,sizes)
@@ -154,12 +156,8 @@ def show_image(features, data, title=''):
     # features is [H, W, C]
     # plt.imshow(torch.clip((features * imagenet_std + imagenet_mean) * 255, 0, 255).int())
     data = data / data.max()
-    test11 = np.stack((features[:,:,0],features[:,:,0],features[:,:,0]),axis=2)
-    test11 = np.multiply(test11,np.stack((np.full(data.shape,1),1-data,1-data),axis=2))
-    for i in range(10):
-        alp = 0.5
-        test11 = np.multiply(test11,np.stack((features[:,:,i+1],features[:,:,i+1],features[:,:,i+1]),axis=2)*alp+(1-alp))
-    plt.imshow(test11)
+    # test11 = np.stack((np.full(data.shape,1),1-data,1-data),axis=2)
+    plt.imshow(data)
     plt.title(title, fontsize=23)
     plt.axis('off')
     return
@@ -178,6 +176,26 @@ def run_one_image(x, target, model, epoch=None):
     
     y = y.squeeze(3).detach().cpu()
 
+    # Read the labelmap file
+    labelmap_path = '/home/placido.falqueto/IRI_Barcelona/maps/13semantics/labelmap.txt'
+    with open(labelmap_path, 'r') as f:
+        labelmap = f.readlines()
+    labelmap.pop(0)
+    labelmap.pop(0)
+
+    colors = []
+    # Iterate over each label in the labelmap
+    for i, label in enumerate(labelmap):
+        label = label.strip().split(':')
+        label_color = np.array(label[1].split(','), dtype=int)
+        colors.append(label_color)
+
+    sem_map = np.zeros((x.shape[1],x.shape[2],3))
+    for i in range(len(colors)):
+        sem = np.full((x.shape[1],x.shape[2],3),colors[i])
+        sem_map = np.squeeze(np.stack((1-x[:,:,:,i],1-x[:,:,:,i],1-x[:,:,:,i]), axis=3),axis=0)*sem+sem_map
+    sem_map = sem_map/255
+
     is_mae = 0
     if mask is not None:
         # visualize the mask
@@ -185,10 +203,11 @@ def run_one_image(x, target, model, epoch=None):
         mask = mask.unsqueeze(-1).repeat(1, 1, model.module.patch_embed.patch_size[0]**2 *1)  # (N, H*W, p*p*3)
         mask = model.module.unpatchify(mask)  # 1 is removing, 0 is keeping
         mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
-        mask = mask.squeeze(-1)
+        mask = mask.squeeze(0)
 
         # masked image
-        im_masked = target * (1 - mask) + mask*target.max()
+        msk = torch.tensor(np.full((mask.shape[0],mask.shape[1],3),[255,0,0]))*mask
+        im_masked = torch.tensor(sem_map) * (1 - mask) + msk
 
         is_mae = 1
 
@@ -198,14 +217,21 @@ def run_one_image(x, target, model, epoch=None):
     # make the plt figure larger
     plt.rcParams['figure.figsize'] = [24, 12] # W: 24, H: 12
 
-    plt.subplot(1, 2+is_mae, 1)
-    show_image(x[0], target[0], "original")
+    plt.subplot(1, 3+is_mae, 1)
+    plt.imshow(sem_map)
+    plt.title("semantics", fontsize=23)
+    plt.axis('off')
 
     if is_mae:
-        plt.subplot(1, 2+is_mae, 2)
-        show_image(x[0], im_masked[0], "masked")
+        plt.subplot(1, 3+is_mae, 2)
+        plt.imshow(im_masked)
+        plt.title("masked", fontsize=23)
+        plt.axis('off')
 
-    plt.subplot(1, 2+is_mae, 2+is_mae)
+    plt.subplot(1, 3+is_mae, 2+is_mae)
+    show_image(x[0], target[0], "original")
+
+    plt.subplot(1, 3+is_mae, 3+is_mae)
     show_image(x[0], y[0], "prediction")
 
     # plt.subplot(1, 4, 3)
@@ -252,24 +278,27 @@ def main(rank, world_size):
     split_percentage = 0.9
     data_dirs = os.listdir(DATASET_PATH)
     data_dirs.sort()
-    # len_train_data = int((len(data_dirs) - 1) * split_percentage)
-    # train_data_dirs = random.sample(data_dirs, len_train_data)
-    # # train_data_dirs = data_dirs[-len_train_data:]
-    # val_data_dirs = [x for x in data_dirs if x not in train_data_dirs]
-    # train_data_dirs.sort()
-    # val_data_dirs.sort()
-    # test_data_dirs = val_data_dirs # [val_data_dirs.pop()]
-    # # train_data_dirs = [train_data_dirs.pop()]         # UNCOMMENT FOR FAST DEBUGGING 
-    # # val_data_dirs = [val_data_dirs.pop()]             # UNCOMMENT FOR FAST DEBUGGING 
+    random.shuffle(data_dirs)
+    data_dirs = [f for f in data_dirs if 'gates1' not in f]
+    data_dirs = [f for f in data_dirs if 'coupa3' not in f]
+    #add 'stanford_gates1' to the beginning of the list
+    data_dirs = ['stanford_coupa3'] + ['stanford_gates1'] + data_dirs
 
-    i = 0
+
     # if True:
+    #     i = 0
     for i in range(len(data_dirs)):
-
         train_data_dirs = data_dirs[:]
-        val_data_dirs = [train_data_dirs.pop(i)]
-        test_data_dirs = val_data_dirs
-        model_id = val_data_dirs[0]
+        test_data_dirs = [train_data_dirs.pop(i)]
+        random.shuffle(train_data_dirs)
+        val_data_dirs = [train_data_dirs.pop(i%len(train_data_dirs)), 
+                         train_data_dirs.pop(i%len(train_data_dirs)), 
+                         train_data_dirs.pop(i%len(train_data_dirs))]
+        
+        train_data_dirs = np.sort(train_data_dirs)
+        val_data_dirs = np.sort(val_data_dirs)
+
+        model_id = test_data_dirs[0]
         
         print(f'TRAINING MAPS: {train_data_dirs}\n')
         print(f'VALIDATION MAPS: {val_data_dirs}\n')
@@ -347,6 +376,8 @@ def main(rank, world_size):
 
         print(f"Start training for {args.epochs} epochs")
         start_time = time.time()
+
+        vlosses = np.arange(1, STOP_TRAINING_AFTER_EPOCHS+1, dtype=float)[::-1]
         for epoch in range(args.start_epoch, args.epochs+1):
             if args.distributed:
                 data_loader_train.sampler.set_epoch(epoch)
@@ -356,16 +387,30 @@ def main(rank, world_size):
                 log_writer=log_writer,
                 args=args
             )
+
+            # Update array with new value
+            vlosses = np.roll(vlosses, -1)  # Shift elements to the left
+            vlosses[-1] = train_stats['val_loss']  # Update the last element
+            # check if vlosses stop decreasing
+            stopped_decreasing = np.mean(np.diff(vlosses)) > -1e-4 and epoch > 40
+            # print(f'vlosses: {vlosses}')
+            # print(f'vlosses diff: {np.diff(vlosses)}')
+            # print(f'stopped_decreasing: {stopped_decreasing}')
+
             if epoch % 5 == 0 or epoch == args.epochs:    
                 idx = np.random.randint(0, dataset_test.__len__())
                 print(f'sample id: {idx}')
                 features_test = features[idx]
                 target_test = target[idx]
                 run_one_image(features_test, target_test, model, epoch)
-            if args.output_dir and epoch == args.epochs:
+                misc.save_model(
+                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                    loss_scaler=loss_scaler, epoch=102, id=model_id, prefix=prfx)
+            if args.output_dir and (epoch == args.epochs or stopped_decreasing):
                 misc.save_model(
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
                     loss_scaler=loss_scaler, epoch=epoch, id=model_id, prefix=prfx)
+                break
 
             log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                             'epoch': epoch,}

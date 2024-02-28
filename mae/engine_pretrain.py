@@ -82,8 +82,8 @@ def train_one_epoch(model: torch.nn.Module,
             del sample_val, target_val, pred_val
         
         metric_logger.update(val_loss=val_loss_value)
-        val_loss_value_reduce = misc.all_reduce_mean(val_loss_value)
 
+        val_loss_value_reduce = misc.all_reduce_mean(val_loss_value)
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.

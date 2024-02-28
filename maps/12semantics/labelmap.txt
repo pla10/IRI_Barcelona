@@ -1,0 +1,15 @@
+# label:color_rgb:parts:actions
+background:0,0,0::
+bicycle road:255,204,51::
+building:189,189,189::
+entrance:255,255,255::
+grass:61,245,61::
+obstacle:0,0,0::
+parking:255,0,204::
+pedestrian road:42,125,209::
+tree:9,117,45::
+vehicle road:250,50,83::
+sitting area:0,255,200::
+stairs:255,145,0::
+intersection zone:151,77,255::
+shaded area:86,50,0::
