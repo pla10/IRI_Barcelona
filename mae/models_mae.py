@@ -14,16 +14,31 @@ from functools import partial
 import torch
 import torch.nn as nn
 
-import numpy as np
-
 from timm.models.vision_transformer import PatchEmbed, Block
 
 from util.pos_embed import get_2d_sincos_pos_embed
 
 
-
 class MaskedAutoencoderViT(nn.Module):
-    """ Masked Autoencoder with VisionTransformer backbone
+    """ Masked Autoencoder with VisionTransformer backbone.
+
+    This model implements a masked autoencoder (MAE) architecture for image reconstruction, 
+    leveraging a Vision Transformer (ViT) as its main component.
+
+    Args:
+        img_size (int, optional): Input image size (assuming square images). Defaults to 64.
+        patch_size (int, optional): Size of patches extracted from the input image. Defaults to 16.
+        in_chans (int, optional): Number of input channels. Defaults to 13.
+        out_chans (int, optional): Number of output channels. Defaults to 1.
+        embed_dim (int, optional): Dimensionality of the patch embedding. Defaults to 1024.
+        depth (int, optional): Number of ViT blocks in the encoder. Defaults to 24.
+        num_heads (int, optional): Number of attention heads in the ViT blocks. Defaults to 16.
+        decoder_embed_dim (int, optional): Embedding dimensionality for the decoder. Defaults to 512.
+        decoder_depth (int, optional): Number of ViT blocks in the decoder. Defaults to 8.
+        decoder_num_heads (int, optional): Number of attention heads in the decoder's ViT blocks. Defaults to 16.
+        mlp_ratio (float, optional): Ratio for the MLP layer in ViT blocks. Defaults to 4.
+        norm_layer (nn.Module, optional): Normalization layer. Defaults to nn.LayerNorm.
+        norm_pix_loss (bool, optional): Whether to normalize pixel values in the loss calculation. Defaults to False.
     """
     def __init__(self, img_size=64, patch_size=16, in_chans=13, out_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
@@ -233,44 +248,46 @@ class MaskedAutoencoderViT(nn.Module):
         target = self.patchify(target)
         pred = self.patchify(pred)
         
-        if self.norm_pix_loss:
-            mean = target.mean(dim=-1, keepdim=True)
-            var = target.var(dim=-1, keepdim=True)
-            target = (target - mean) / (var + 1.e-6)**.540
+        # if self.norm_pix_loss:
+        #     mean = target.mean(dim=-1, keepdim=True)
+        #     var = target.var(dim=-1, keepdim=True)
+        #     target = (target - mean) / (var + 1.e-6)**.540
 
-        loss = (pred - target) ** 2
-        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+        # loss = (pred - target) ** 2
+        # loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
         
-        # print(f'target mean: {target[0].mean()}')
-        # print(f'pred mean: {pred[0].mean()}')
-        # import matplotlib.pyplot as plt
-        # import sys
-        # chos = 0
-        # plt.rcParams['figure.figsize'] = [12, 24]
-        # for i in range(16):
-        #     plt.subplot(8, 4, i+1)
-        #     plt.imshow(pred[chos][i].view(8,8).detach().cpu().numpy())
-        #     plt.title(f'{loss[chos][i]:.4f}')
-        #     plt.axis('off')
-        #     plt.subplot(8, 4, i+16+1)
-        #     plt.imshow(target[chos][i].view(8,8).detach().cpu().numpy())
-        #     plt.axis('off')
-        # plt.savefig(f'output_dir/reconstructed.png')
-        # # sys.exit(0)
+        # # print(f'target mean: {target[0].mean()}')
+        # # print(f'pred mean: {pred[0].mean()}')
+        # # import matplotlib.pyplot as plt
+        # # import sys
+        # # chos = 0
+        # # plt.rcParams['figure.figsize'] = [12, 24]
+        # # for i in range(16):
+        # #     plt.subplot(8, 4, i+1)
+        # #     plt.imshow(pred[chos][i].view(8,8).detach().cpu().numpy())
+        # #     plt.title(f'{loss[chos][i]:.4f}')
+        # #     plt.axis('off')
+        # #     plt.subplot(8, 4, i+16+1)
+        # #     plt.imshow(target[chos][i].view(8,8).detach().cpu().numpy())
+        # #     plt.axis('off')
+        # # plt.savefig(f'output_dir/reconstructed.png')
+        # # # sys.exit(0)
         
 
-        # if mask is not None:
-        #     loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        # else:
-        loss = loss.mean()
+        # # if mask is not None:
+        # #     loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        # # else:
+        # loss = loss.mean()
 
-        # pred[pred == 0] = 1e-12
-        # pred[pred == 1] = 1-1e-12
-        # target[target == 0] = 1e-12
-        # target[target == 1] = 1-1e-12
-
-        # loss = torch.nn.BCEWithLogitsLoss()(pred, target)
+        # # pred[pred == 0] = 1e-12
+        # # pred[pred == 1] = 1-1e-12
+        # # target[target == 0] = 1e-12
+        # # target[target == 1] = 1-1e-12
+        
+        # Use BCE with logits (pytorch expects logits for BCE loss)
+        loss = torch.nn.functional.binary_cross_entropy_with_logits(pred, target, reduction='mean')
         # loss = torch.nn.functional.kl_div(pred.log(), target, reduction='batchmean')
+
         
         return loss
 
@@ -320,3 +337,38 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
 mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_large_patch16 = mae_vit_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_huge_patch14 = mae_vit_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -34,13 +34,39 @@ from engine_pretrain import train_one_epoch
 import warnings
 warnings.filterwarnings('ignore')
 
+
+
+
+import argparse
+import os
+import random
+import time
+
+import torch
+import torch.backends.cudnn as cudnn
+import torch.distributed as dist  
+import torchvision.transforms as transforms
+
+import timm
+import util.misc as misc
+import models_mae
+
+from engine_pretrain import train_one_epoch 
+from torch.utils.data import Dataset, DataLoader
+
+
+
+
 DATASET_PATH = '/data/placido/training_data/64crop_size/13labels/1red/'
 STOP_TRAINING_AFTER_EPOCHS = 15
 input_size = 64
 mask_ratio = 0.75 # 0.75
-prfx = 'stops1'
-Yfile = 'train_Y2'
+prfx = 'xentropy_test'
+Yfile = 'train_Y'
 
+# -------------------------
+# Argument Parsing
+# -------------------------
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=200, type=int,
@@ -110,8 +136,12 @@ def get_args_parser():
 
     return parser
 
-
+# -------------------------
+# Dataset 
+# -------------------------
 class SemanticMapDataset(Dataset):
+    """Loads semantic map data from specified directories.
+    """
     def __init__(self, data_dirs, transform=None, target_transform=None):
         self.train_x = np.empty((0, input_size, input_size, 13))
         self.train_y = np.empty((0, input_size, input_size))
@@ -149,12 +179,13 @@ class SemanticMapDataset(Dataset):
             target = self.target_transform(target)
         return features, target
 
-imagenet_mean = np.array([0.485, 0.456, 0.406])
-imagenet_std = np.array([0.229, 0.224, 0.225])
-
+# -------------------------
+# Visualization Functions
+# -------------------------
 def show_image(features, data, title=''):
+    """Processes and visualizes a single image for analysis.
+    """
     # features is [H, W, C]
-    # plt.imshow(torch.clip((features * imagenet_std + imagenet_mean) * 255, 0, 255).int())
     data = data / data.max()
     # test11 = np.stack((np.full(data.shape,1),1-data,1-data),axis=2)
     plt.imshow(data)
@@ -170,7 +201,9 @@ def run_one_image(x, target, model, epoch=None):
     # run MAE
     x = x.to('cuda')
     target = target.to('cuda')
-    _, y, mask = model(x, mask_ratio=mask_ratio)
+    model.eval()  # Set the model to evaluation mode
+    with torch.no_grad():
+        _, y, mask = model(x, mask_ratio=mask_ratio)
     x = x.detach().cpu()
     target = target.detach().cpu()
     
@@ -251,37 +284,48 @@ def run_one_image(x, target, model, epoch=None):
     else:
         plt.show()
     
-
+# -------------------------
+# Main Function
+# -------------------------
 def main(rank, world_size):
+    """
+    Main entry point for distributed training and evaluation.
+
+    Args:
+        rank (int): The rank of the current process within the distributed group.
+        world_size (int): The total number of processes in the distributed group.
+    """
     os.environ['RANK'] = str(rank)
     os.environ['LOCAL_RANK'] = str(rank)
 
-    args = get_args_parser()
-    args = args.parse_args()
+    args = get_args_parser().parse_args()   # Get command-line arguments
+
+    # Prepare output directory and logging
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    misc.init_distributed_mode(args)
+    misc.init_distributed_mode(args)        # Initialize distributed environment
 
     print('job dir: {}'.format(os.path.abspath('')))
     print("{}".format(args).replace(', ', ',\n'))
 
     device = torch.device(args.device)
 
-    # fix the seed for reproducibility
+    # Seed for reproducibility
     seed = args.seed + misc.get_rank()
     torch.manual_seed(seed)
     np.random.seed(seed)
 
     cudnn.benchmark = True
 
-    split_percentage = 0.9
+    # -------------------------
+    # Data Preparation
+    # -------------------------
     data_dirs = os.listdir(DATASET_PATH)
     data_dirs.sort()
     random.shuffle(data_dirs)
-    data_dirs = [f for f in data_dirs if 'gates1' not in f]
-    data_dirs = [f for f in data_dirs if 'coupa3' not in f]
-    #add 'stanford_gates1' to the beginning of the list
+    # Remove unwanted maps and insert specific ones 
+    data_dirs = [f for f in data_dirs if 'gates1' not in f and 'coupa3' not in f]
     data_dirs = ['stanford_coupa3'] + ['stanford_gates1'] + data_dirs
 
 
@@ -289,43 +333,30 @@ def main(rank, world_size):
     #     i = 0
     for i in range(len(data_dirs)):
         train_data_dirs = data_dirs[:]
-        test_data_dirs = [train_data_dirs.pop(i)]
+        test_data_dirs = [train_data_dirs.pop(i)] # Pop the i-th map for testing
         random.shuffle(train_data_dirs)
-        val_data_dirs = [train_data_dirs.pop(i%len(train_data_dirs)), 
-                         train_data_dirs.pop(i%len(train_data_dirs)), 
-                         train_data_dirs.pop(i%len(train_data_dirs))]
+        val_data_dirs = [train_data_dirs.pop(i % len(train_data_dirs)) for i in range(3)]
         
         train_data_dirs = np.sort(train_data_dirs)
         val_data_dirs = np.sort(val_data_dirs)
 
         model_id = test_data_dirs[0]
         
-        print(f'TRAINING MAPS: {train_data_dirs}\n')
-        print(f'VALIDATION MAPS: {val_data_dirs}\n')
-        print(f'TEST MAP: {test_data_dirs}\n')
+        print(f'TRAINING MAPS: {train_data_dirs}')
+        print(f'VALIDATION MAPS: {val_data_dirs}')
+        print(f'TEST MAP: {test_data_dirs}')
         print('-------------------------------------')
 
+        # Create Datasets
         dataset_train = SemanticMapDataset(data_dirs=train_data_dirs)
         dataset_val = SemanticMapDataset(data_dirs=val_data_dirs)
-
-        data_loader_val = torch.utils.data.DataLoader(
-            dataset_val, sampler=None,
-            batch_size=args.batch_size,
-            num_workers=0,
-            pin_memory=False,
-            drop_last=True,
-        )
-
         dataset_test = SemanticMapDataset(data_dirs=test_data_dirs)
-        data_loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=dataset_test.__len__(), shuffle=False)
-        features, target = next(iter(data_loader_test))
 
+        # -------------------------
+        # Distributed Setup
+        # -------------------------
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
-        print("Sampler_train = %s" % str(sampler_train))
 
         data_loader_train = torch.utils.data.DataLoader(
             dataset_train, sampler=sampler_train,
@@ -334,7 +365,24 @@ def main(rank, world_size):
             pin_memory=args.pin_mem,
             drop_last=True,
         )
+        data_loader_val = torch.utils.data.DataLoader(
+            dataset_val, sampler=None,
+            batch_size=args.batch_size,
+            num_workers=0,
+            pin_memory=False,
+            drop_last=True,
+        )
+        data_loader_test = torch.utils.data.DataLoader(
+            dataset_test, 
+            batch_size=dataset_test.__len__(), 
+            shuffle=False
+        )
+        features, target = next(iter(data_loader_test))
 
+        sampler_train = torch.utils.data.DistributedSampler(
+            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+        )
+        print("Sampler_train = %s" % str(sampler_train))
         print('------------------- DATA LOADED -------------------')
 
         if global_rank == 0 and args.log_dir is not None:
