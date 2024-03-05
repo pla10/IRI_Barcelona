@@ -235,7 +235,7 @@ class MaskedAutoencoderViT(nn.Module):
         mask: [N, L], 0 is keep, 1 is remove, 
         """
 
-        # target = target / target.max()
+        target = target / target.max()
 
         # for b in range(target.shape[0]):
         #     max_target = target[b].max().item()

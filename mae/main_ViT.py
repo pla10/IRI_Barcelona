@@ -5,10 +5,7 @@ import numpy as np
 import os
 import time
 from pathlib import Path
-import sys
-import cv2
 
-import pandas as pd
 from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 import random
@@ -16,8 +13,6 @@ import random
 import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.tensorboard import SummaryWriter
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 
 import timm
 
@@ -30,31 +25,6 @@ from util.misc import NativeScalerWithGradNormCount as NativeScaler
 import models_mae
 
 from engine_pretrain import train_one_epoch
-
-import warnings
-warnings.filterwarnings('ignore')
-
-
-
-
-import argparse
-import os
-import random
-import time
-
-import torch
-import torch.backends.cudnn as cudnn
-import torch.distributed as dist  
-import torchvision.transforms as transforms
-
-import timm
-import util.misc as misc
-import models_mae
-
-from engine_pretrain import train_one_epoch 
-from torch.utils.data import Dataset, DataLoader
-
-
 
 
 DATASET_PATH = '/data/placido/training_data/64crop_size/13labels/1red/'
@@ -358,6 +328,11 @@ def main(rank, world_size):
         num_tasks = misc.get_world_size()
         global_rank = misc.get_rank()
 
+        sampler_train = torch.utils.data.DistributedSampler(
+            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
+        )
+        print("Sampler_train = %s" % str(sampler_train))
+
         data_loader_train = torch.utils.data.DataLoader(
             dataset_train, sampler=sampler_train,
             batch_size=args.batch_size,
@@ -379,10 +354,6 @@ def main(rank, world_size):
         )
         features, target = next(iter(data_loader_test))
 
-        sampler_train = torch.utils.data.DistributedSampler(
-            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
-        )
-        print("Sampler_train = %s" % str(sampler_train))
         print('------------------- DATA LOADED -------------------')
 
         if global_rank == 0 and args.log_dir is not None:
